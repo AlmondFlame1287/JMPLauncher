@@ -4,27 +4,39 @@ import javax.swing.*;
 
 import java.io.*;
 import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.URL;
 
-public class Launcher extends JDialog {
+public class Launcher extends JFrame {
     private static final String LAUNCHER_VER = "v1.0.0";
     private static final String RELEASE_API = "https://api.github.com/repos/AlmondFlame1287/JMP/releases/latest";
+    private static final JProgressBar progressBar = new JProgressBar(0, 100);
+    private static int contentLength;
 
     public Launcher() {
         this.setup();
-        this.initLauncher();
+        this.setupProgressBar();
         try {
             this.checkForUpdates();
         } catch (IOException ignored) {}
+        this.setVisible(true);
     }
 
-    private void initLauncher() {
+    private void setupProgressBar() {
+        progressBar.setStringPainted(true);
+        progressBar.setValue(0);
+        this.setLayout(new BoxLayout(getContentPane(), BoxLayout.Y_AXIS));
+        this.add(new JLabel("Checking and downloading new updates..."));
+        this.add(progressBar);
+        this.add(Box.createVerticalStrut(10));
+        this.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
     }
 
     private void checkForUpdates() throws IOException {
         final URL api = new URL(RELEASE_API);
         HttpURLConnection connection = (HttpURLConnection) api.openConnection();
         connection.setRequestMethod("GET");
+        contentLength = connection.getContentLength();
 
         final String response = parseResponse(connection.getInputStream());
         final String tag = extractTag(response);
@@ -35,9 +47,30 @@ public class Launcher extends JDialog {
             return;
         }
 
+        SwingWorker<Void, Integer> worker = getVoidIntegerSwingWorker(jarURL);
+        worker.execute();
+    }
+
+    private SwingWorker<Void, Integer> getVoidIntegerSwingWorker(String jarURL) throws MalformedURLException {
         final URL downloadURL = new URL(jarURL);
 
-        this.downloadUpdate(downloadURL);
+        return new SwingWorker<Void, Integer>() {
+            @Override
+            protected Void doInBackground() {
+                downloadUpdate(downloadURL);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                dispose();
+                try {
+                    launchMainApp();
+                } catch (IOException e) {
+                    JOptionPane.showMessageDialog(Launcher.this, "Failed to launch app: " + e.getMessage());
+                }
+            }
+        };
     }
 
     private String extractTag(String response) {
@@ -90,8 +123,15 @@ public class Launcher extends JDialog {
             byte[] buffer = new byte[4096];
 
             int count;
+            int totalRead = 0;
             while((count = in.read(buffer, 0, buffer.length)) != -1) {
                 fileOut.write(buffer, 0, count);
+                totalRead += count;
+
+                if(contentLength <= 0) continue;
+
+                int percent = (int) (((double) totalRead / contentLength) * 100);
+                SwingUtilities.invokeLater(() -> progressBar.setValue(percent));
             }
         } catch (IOException ioe) {
             final String message = "Something went wrong with the update procedure: " + ioe.getMessage();
@@ -100,13 +140,15 @@ public class Launcher extends JDialog {
         }
     }
 
+    private void launchMainApp() throws IOException {
+        new ProcessBuilder("java", "-jar", "jmp.jar").inheritIO().start();
+    }
+
     private void setup() {
         this.setTitle("JMP Update Checker v" + LAUNCHER_VER);
         this.setSize(300, 100);
-        this.setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         this.setResizable(false);
         this.setLocationRelativeTo(null);
-        this.setVisible(true);
     }
 
     public static void main(String[] args) {
